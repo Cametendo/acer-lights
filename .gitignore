@@ -1,0 +1,16 @@
+# Kernel module build output
+driver/*.ko
+driver/*.o
+driver/*.mod
+driver/*.mod.c
+driver/.*.cmd
+driver/modules.order
+driver/Module.symvers
+driver/.tmp_versions/
+
+# Hardware dump from collect-info.sh (contains serial numbers and firmware tables)
+dump/
+
+# Python
+__pycache__/
+*.pyc

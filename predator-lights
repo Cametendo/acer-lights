@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Control the case and fan lighting of an Acer Predator Orion desktop.
+
+Talks to the predator_lights kernel module through its sysfs files.
+"""
+import argparse
+import glob
+import os
+import sys
+import time
+
+STATE = "/var/lib/predator-lights/state"
+
+SYSFS = "/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56*"
+EFFECTS = ["static", "breathing", "heartbeat", "twinkling", "rainbow", "wave",
+           "risen", "stack", "extend", "meteorite", "magic", "snake"]
+COLORS = {"red": "ff0000", "green": "00ff00", "blue": "0000ff", "white": "ffffff",
+          "yellow": "ffff00", "cyan": "00ffff", "magenta": "ff00ff", "orange": "ff5000",
+          "purple": "8000ff", "pink": "ff2080"}
+
+
+def die(msg):
+    sys.exit(f"predator-lights: {msg}")
+
+
+def area_files():
+    files = sorted(glob.glob(os.path.join(SYSFS, "area[0-9]")))
+    if not files:
+        die("no lighting areas found, is the predator_lights module loaded? (sudo modprobe predator_lights)")
+    return {int(f[-1]): f for f in files}
+
+
+def read(path):
+    with open(path) as f:
+        return f.readline().split()
+
+
+def apply(area, effect, color="ffffff", brightness=100, speed=5):
+    files = area_files()
+    if area not in files:
+        die(f"area {area} does not exist here, available: {', '.join(map(str, files))}")
+    want = f"{effect} {color} {brightness} {speed}"
+    # The firmware silently drops a change when its bus is busy, so check and retry.
+    for _ in range(3):
+        try:
+            with open(files[area], "w") as f:
+                f.write(want)
+        except PermissionError:
+            die(f"no write access to {files[area]}, install the udev rule or run as root")
+        time.sleep(0.05)
+        got = read(files[area])
+        if got[0] == effect and (effect != "static" or got[1] == color):
+            remember(area, want)
+            return
+    print(f"predator-lights: firmware reports '{' '.join(got)}' after asking for '{want}'",
+          file=sys.stderr)
+
+
+def remember(area, want):
+    """Keep the last setting of each area so the boot service can put it back."""
+    try:
+        state = dict(line.split(None, 1) for line in open(STATE).read().splitlines() if line)
+    except OSError:
+        state = {}
+    if area == 0:
+        state = {}
+    state[str(area)] = want
+    try:
+        with open(STATE, "w") as f:
+            f.writelines(f"{a} {w}\n" for a, w in sorted(state.items()))
+    except OSError:
+        pass
+
+
+def restore():
+    try:
+        lines = open(STATE).read().splitlines()
+    except OSError:
+        return
+    for line in lines:
+        area, effect, color, brightness, speed = line.split()
+        apply(int(area), effect, color, int(brightness), int(speed))
+
+
+def color_arg(value):
+    value = COLORS.get(value.lower(), value).lstrip("#").lower()
+    if len(value) != 6 or any(c not in "0123456789abcdef" for c in value):
+        raise argparse.ArgumentTypeError(
+            f"'{value}' is not a colour, use rrggbb or one of: {', '.join(COLORS)}")
+    return value
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument("-a", "--area", type=int, default=0,
+                   help="lighting area, 0 = everything (default)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("color", aliases=["static"], help="one fixed colour")
+    s.add_argument("color", type=color_arg, help="rrggbb or a name like red")
+    s.add_argument("-b", "--brightness", type=int, choices=range(0, 101), default=100,
+                   metavar="0-100")
+
+    s = sub.add_parser("default", aliases=["rainbow", "cycle"], help="the factory RGB cycle")
+    s.add_argument("-s", "--speed", type=int, choices=range(0, 10), default=5, metavar="0-9")
+    s.add_argument("-b", "--brightness", type=int, choices=range(0, 101), default=100,
+                   metavar="0-100")
+
+    sub.add_parser("off", help="lights off")
+
+    s = sub.add_parser("effect", help="any other effect")
+    s.add_argument("effect", choices=EFFECTS)
+    s.add_argument("color", type=color_arg, nargs="?", default="ffffff")
+    s.add_argument("-s", "--speed", type=int, choices=range(0, 10), default=5, metavar="0-9")
+    s.add_argument("-b", "--brightness", type=int, choices=range(0, 101), default=100,
+                   metavar="0-100")
+
+    sub.add_parser("status", help="show what the firmware reports")
+    sub.add_parser("restore", help="apply the last setting again (used at boot)")
+
+    args = p.parse_args()
+    if args.cmd in ("color", "static"):
+        apply(args.area, "static", args.color, args.brightness)
+    elif args.cmd in ("default", "rainbow", "cycle"):
+        apply(args.area, "rainbow", brightness=args.brightness, speed=args.speed)
+    elif args.cmd == "off":
+        apply(args.area, "off")
+    elif args.cmd == "effect":
+        apply(args.area, args.effect, args.color, args.brightness, args.speed)
+    elif args.cmd == "restore":
+        restore()
+    else:
+        for area, path in area_files().items():
+            effect, color, brightness, speed = read(path)
+            name = "all" if area == 0 else f"area {area}"
+            print(f"{name:7} {effect:10} #{color}  brightness {brightness:>3}  speed {speed}")
+
+
+if __name__ == "__main__":
+    main()

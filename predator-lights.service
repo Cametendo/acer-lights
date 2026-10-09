@@ -1,0 +1,11 @@
+[Unit]
+Description=Restore Acer Predator case lighting
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/modprobe predator_lights
+ExecStart=/usr/local/bin/predator-lights restore
+
+[Install]
+WantedBy=multi-user.target

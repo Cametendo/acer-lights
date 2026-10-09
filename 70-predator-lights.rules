@@ -1,0 +1,2 @@
+# Let local users change the Predator case lighting without root.
+ACTION=="bind", SUBSYSTEM=="wmi", DRIVER=="predator_lights", RUN+="/bin/sh -c 'chgrp users /sys$devpath/area[0-9]'"
