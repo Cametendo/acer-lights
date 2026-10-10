@@ -60,7 +60,7 @@ models or lighting presets, look there; this project is deliberately minimal.
 ## Install
 
 ```sh
-git clone <this repository>
+git clone https://github.com/Cametendo/acer-lights
 cd acer-lights
 make -C driver
 sudo sh install.sh
